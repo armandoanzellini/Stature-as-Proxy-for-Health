@@ -13,8 +13,9 @@ import numpy as np
 import arviz as az
 import pandas as pd
 import matplotlib.pyplot as plt
-from math import ceil, floor
 from scipy import stats
+from pathlib import Path
+from math import ceil, floor
 from itertools import combinations
 from matplotlib.ticker import AutoMinorLocator
 
@@ -31,18 +32,74 @@ def q1(mean, std):
 def q3(mean, std):
     return mean + (0.6745*std)
 
-# estimate minimum and maximum of Ancón as if it were a Student's t dist
+# estimate minimum and maximum as if it were a Student's t dist
 def minimum(df):
     IQR = df['q3'] - df['q1']
     maxim = df['q3'] + (1.*IQR)
     minim = df['q1'] - (1.*IQR)
     return minim, maxim
 
+def plot_boxplots(m_data, f_data, sites, out_dir=None):
+    # apply functions to df to get quartiles
+    m_data['q1'] = q1(m_data['Mean'], m_data['STD'])
+    m_data['q3'] = q3(m_data['Mean'], m_data['STD'])
+
+    f_data['q1'] = q1(f_data['Mean'], f_data['STD'])
+    f_data['q3'] = q3(f_data['Mean'], f_data['STD'])
+
+    # get dictionaries of values needed for boxplots
+    stat_dict = {'Mean' : 'med', 'Min': 'whislo', 'Max' : 'whishi'} # define rename dict
+
+    bm_data = m_data[['Mean', 'q1', 'q3', 'Min', 'Max']].rename(stat_dict, axis=1)
+    bf_data = f_data[['Mean', 'q1', 'q3', 'Min', 'Max']].rename(stat_dict, axis=1)
+
+    # remove La Petaca from Anatomical Stature Box Plots
+    bm_data = bm_data.loc[sites]
+    bf_data = bf_data.loc[sites]
+
+    # make them list of dicts
+    bml = [value for value in bm_data.to_dict(orient='index').values()]
+    bfl = [value for value in bf_data.to_dict(orient='index').values()]
+
+    fig, (ax1, ax2) = plt.subplots(2,1, figsize=(10, 15))
+    # male boxplots
+    ax1.bxp(bml, showfliers=False)
+    ax1.set_xticklabels(list(bm_data.index), fontsize=14)
+    ax1.set_ylabel('Anatomical Stature (cm)', fontsize=14)
+    ax1.set_title('Distribution of Male Stature', fontsize=14)
+    ax1.yaxis.set_minor_locator(AutoMinorLocator())
+
+    # female boxplots
+    ax2.bxp(bfl, showfliers=False)
+    ax2.set_xticklabels(list(bf_data.index), fontsize=14 )
+    ax2.set_ylabel('Anatomical Stature (cm)', fontsize=14)
+    ax2.set_title('Distribution of Female Stature', fontsize=14)
+    ax2.yaxis.set_minor_locator(AutoMinorLocator())
+
+    if out_dir:
+        plt.savefig(out_dir / "CombinedStat_dist.png", dpi = 800, bbox_inches='tight')
+    else:
+        plt.show()
+        
 # Bayesian reanylisis from summary stats using a hierarchical model
 # Hierarchical model of multigroup comparisons 2009 A FirstCourseinBayesian
 # get standard error for each group
 
-def bayes_ANOVA(df, out_dir, label, savefig=False):
+def bayes_ANOVA(df, label, out_dir=None):
+    # define linestyles for plotting below
+    linestyles = [
+                 'solid', 
+                 'dashed', 
+                 'dashdot',
+                 (5, (10, 3)),
+                 (0, (5, 1)),
+                 (0, (3, 10, 1, 10)),
+                 (0, (3, 1, 1, 1)),
+                 (0, (3, 5, 1, 5, 1, 5)),
+                 (0, (3, 10, 1, 10, 1, 10)),
+                 (0, (3, 1, 1, 1, 1, 1))
+                 ]
+    
     df['SE'] = df['STD']/np.sqrt(df['N'])
     
     gm = sum(df['N']*df['Mean'])/df['N'].sum() # grand mean to use in Bayes ANOVA
@@ -83,7 +140,10 @@ def bayes_ANOVA(df, out_dir, label, savefig=False):
     # rename summary df to have site names
     sites = list(df.index)
     summarydf = summarydf.rename(index=dict(zip(summarydf.index[:len(sites)], sites)))
-    summarydf.to_excel(out_dir / f"ANOVAstats_{label}.xlsx")
+    
+    # save to table if specified
+    if out_dir:
+        summarydf.to_excel(out_dir / f"ANOVAstats_{label}.xlsx")
     
     # Extract all posterior samples for group means and sigma_between
     post_means = trace.posterior["true_group_means"].values  # shape: (chains, draws, groups)
@@ -111,7 +171,7 @@ def bayes_ANOVA(df, out_dir, label, savefig=False):
                 label=sites[i])
         
         
-        err = ax1.errorbar(x=np.mean(x0), y=site_names[i], 
+        err = ax1.errorbar(x=np.mean(x0), y=sites[i], 
                      xerr=[[np.mean(x0) - hdi0[0]], [hdi0[1] - np.mean(x0)]],
                      color='k',
                      marker='o',alpha=0.8)
@@ -168,12 +228,12 @@ def bayes_ANOVA(df, out_dir, label, savefig=False):
     
         
     # get extent of 90% of cauchy to limit plot
-    beta = az.summary(trace, var_names=['beta'])['mean'].values
+    beta_mean = float(trace.posterior['beta'].mean())
     xmin2 = -2.0
-    xmax2 = np.mean(sigmas) + 6.314*beta # 90% of values in dist
+    xmax2 = np.mean(sigmas) + 6.314*beta_mean # 90% of values in dist
     ax2.set_xlim(left=xmin2, right=floor(xmax2))
         
-    if savefig:
+    if out_dir:
         plt.savefig(out_dir / f"BetweenVarDist_{label}.png", dpi = 800, bbox_inches='tight')
     else:
         plt.show()
@@ -194,16 +254,32 @@ def bayes_ANOVA(df, out_dir, label, savefig=False):
         anova_resdict[key] = {'Difference of Means' : round(diff.mean(), 3),
                               '94% HDI'         : f'{hdi[0]:.3f}-{hdi[1]:.3f}'}
         
-        print(f"{site_names[j]} vs {site_names[i]}:")
+        print(f"{sites[j]} vs {sites[i]}:")
         print(f"  Mean difference: {diff.mean():.3f}")
         print(f"  94% HDI:         [{hdi[0]:.3f}, {hdi[1]:.3f}]")
         
     
     resdf = pd.DataFrame.from_dict(anova_resdict, orient='index').sort_index()
-    resdf.to_excel(out_dir / f"PairwiseComp_{label}.xlsx")
+    # save to table if specified
+    if out_dir:
+        resdf.to_excel(out_dir / f"PairwiseComp_{label}.xlsx")
 
 
-def BEST(df1, df2, out_dir, label, savefig=False):
+def BEST(df1, df2, label, out_dir=None):
+    # define linestyles for plotting below
+    linestyles = [
+                 'solid', 
+                 'dashed', 
+                 'dashdot',
+                 (5, (10, 3)),
+                 (0, (5, 1)),
+                 (0, (3, 10, 1, 10)),
+                 (0, (3, 1, 1, 1)),
+                 (0, (3, 5, 1, 5, 1, 5)),
+                 (0, (3, 10, 1, 10, 1, 10)),
+                 (0, (3, 1, 1, 1, 1, 1))
+                 ]
+    
     se_1 = (std_1 := df1['STD']) / np.sqrt(n_1 := df1['N'])
     se_2 = (std_2 := df2['STD']) / np.sqrt(n_2 :=df2['N'])
     
@@ -235,8 +311,11 @@ def BEST(df1, df2, out_dir, label, savefig=False):
     summarydf = az.summary(trace) 
     
     # rename summary df to have site names
-    summarydf = summarydf.rename(index=dict(zip(summarydf.index[:2], ['Kuelap', 'La Petaca'])))
-    summarydf.to_excel(out_dir / f"BESTstats_{label}.xlsx")
+    summarydf = summarydf.rename(index=dict(zip(summarydf.index[:2], [df1.name, df2.name])))
+    
+    # save to table if specified
+    if out_dir:
+        summarydf.to_excel(out_dir / f"BESTstats_{label}.xlsx")
     
     samples1     = trace.posterior["mu_1"].values.flatten()
     samples2     = trace.posterior["mu_2"].values.flatten()
@@ -249,7 +328,7 @@ def BEST(df1, df2, out_dir, label, savefig=False):
     xmax = ceil(np.max(samples))
     
     fig, (ax0, ax1) = plt.subplots(2, 1, sharex=True, height_ratios=[8, 1])
-    for j,i in {'Kuelap' : 0, 'La Petaca' : 1}.items():
+    for j,i in {df1.name : 0, df2.name : 1}.items():
         # def const and distributions
         dens = stats.gaussian_kde(samples[i])
         hdi = az.hdi(samples[i], hdi_prob=0.94)
@@ -284,7 +363,7 @@ def BEST(df1, df2, out_dir, label, savefig=False):
     ax0.legend(loc='upper center', bbox_to_anchor=(.9, 1), fontsize='medium', frameon=False)
     ax1.set_xlim(left=xmin, right=xmax)
     
-    if savefig:
+    if out_dir:
         plt.savefig(out_dir / f"BESTDist_{label}.png", dpi = 800, bbox_inches='tight')
     else:
         plt.show()
@@ -343,7 +422,7 @@ def BEST(df1, df2, out_dir, label, savefig=False):
     # fig.suptitle(f'{label}')
     fig.supxlabel('94% Highest Density Interval (HDI)')
     
-    if savefig:
+    if out_dir:
         plt.savefig(out_dir / f"BEST_{label}.png", dpi = 800, bbox_inches='tight')
     else:
      plt.show() 
@@ -355,73 +434,19 @@ def BEST(df1, df2, out_dir, label, savefig=False):
 if __name__ == '__main__':
     # Load variable from .env file that defines the path to the dataset xlsx file
     with open("env.json", "r") as f:
-        config = json.load(f)
+        direct  = Path(json.load(f)["data_path"])  # get the path securely from the json file
 
-    # Fetch the path securely from the environment
-    direct = config['data_path']
+    data_loc = direct / "StatureData.xlsx"  
 
-    file = r"\StatureData.xlsx"
-
-    mstats = pd.read_excel(direct + file, sheet_name='Male',   index_col='Site')
-    fstats = pd.read_excel(direct + file, sheet_name='Female', index_col='Site')
+    mstats = pd.read_excel(data_loc, sheet_name='Male',   index_col='Site')
+    fstats = pd.read_excel(data_loc, sheet_name='Female', index_col='Site')
 
     # Use site names for plots and results of Bayes ANOVA; only need to get from one sex
     exclude = ['La Petaca', 'Diablo Wasi']
-    site_names = [site for site in list(mstats.index) if site not in exclude]
-    
-    # apply functions to df to get quartiles
-    mstats['q1'] = q1(mstats['Mean'], mstats['STD'])
-    mstats['q3'] = q3(mstats['Mean'], mstats['STD'])
+    site_names = [site for site in mstats.index if site not in exclude]
 
-    fstats['q1'] = q1(fstats['Mean'], fstats['STD'])
-    fstats['q3'] = q3(fstats['Mean'], fstats['STD'])
-
-    # get dictionaries of values needed for boxplots
-    stat_dict = {'Mean' : 'med', 'Min': 'whislo', 'Max' : 'whishi'} # define rename dict
-
-    bmstats = mstats[['Mean', 'q1', 'q3', 'Min', 'Max']].rename(stat_dict, axis=1)
-    bfstats = fstats[['Mean', 'q1', 'q3', 'Min', 'Max']].rename(stat_dict, axis=1)
-
-    # remove La Petaca from Anatomical Stature Box Plots
-    bmstats = bmstats.loc[site_names]
-    bfstats = bfstats.loc[site_names]
-
-    # make them list of dicts
-    bml = [value for value in bmstats.to_dict(orient='index').values()]
-    bfl = [value for value in bfstats.to_dict(orient='index').values()]
-
-    fig, (ax1, ax2) = plt.subplots(2,1, figsize=(10, 15))
-    # male boxplots
-    ax1.bxp(bml, showfliers=False)
-    ax1.set_xticklabels(list(bmstats.index), fontsize=14)
-    ax1.set_ylabel('Anatomical Stature (cm)', fontsize=14)
-    ax1.set_title('Distribution of Male Stature', fontsize=14)
-    ax1.yaxis.set_minor_locator(AutoMinorLocator())
-
-    # female boxplots
-    ax2.bxp(bfl, showfliers=False)
-    ax2.set_xticklabels(list(bfstats.index), fontsize=14 )
-    ax2.set_ylabel('Anatomical Stature (cm)', fontsize=14)
-    ax2.set_title('Distribution of Female Stature', fontsize=14)
-    ax2.yaxis.set_minor_locator(AutoMinorLocator())
-
-    # plt.savefig(out_dir / "CombinedStat_dist.png", dpi = 800, bbox_inches='tight')
-    plt.show()
-
-
-    # just defining linestyles for plotting later
-    linestyles = [
-                 'solid', 
-                 'dashed', 
-                 'dashdot',
-                 (5, (10, 3)),
-                 (0, (5, 1)),
-                 (0, (3, 10, 1, 10)),
-                 (0, (3, 1, 1, 1)),
-                 (0, (3, 5, 1, 5, 1, 5)),
-                 (0, (3, 10, 1, 10, 1, 10)),
-                 (0, (3, 1, 1, 1, 1, 1))
-                 ]
+    # create the boxplots
+    plot_boxplots(mstats, fstats, site_names, out_dir=None)
 
 
     # Start statistical analysis
@@ -437,13 +462,11 @@ if __name__ == '__main__':
 
     kfdf = fstats.loc['Kuelap']
     lpfdf = fstats.loc['La Petaca']
-
-    savefigs = False # variable if figures should be saved
     
     
     # run Bayes functions
-    bayes_ANOVA(dfm, direct, 'Males',  savefig=savefigs)
-    BEST(kmdf, lpmdf, direct, 'Males', savefig=savefigs)
+    bayes_ANOVA(dfm, 'Males',  out_dir=None)
+    BEST(kmdf, lpmdf,'Males',  out_dir=None)
     
-    bayes_ANOVA(dff, direct, 'Females',  savefig=savefigs)
-    BEST(kfdf, lpfdf, direct, 'Females', savefig=savefigs)
+    bayes_ANOVA(dff,  'Females', out_dir=None)
+    BEST(kfdf, lpfdf, 'Females', out_dir=None)
