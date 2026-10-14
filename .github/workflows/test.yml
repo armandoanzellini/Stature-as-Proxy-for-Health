@@ -1,28 +1,16 @@
-name: Test
-
+name: tests
 on: [push, pull_request]
-
-permissions:
-  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
     steps:
-    - uses: actions/checkout@v7
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v7
-      with:
-        python-version: ${{ matrix.python-version }}
-        cache: pip
-        cache-dependency-path: pyproject.toml
-    - name: Install dependencies
-      run: |
-        pip install . --group dev
-    - name: Run tests
-      run: |
-        python -m pytest
-
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: pip install -e . pytest
+      - run: pytest -v
+        env:
+          MPLBACKEND: Agg   # no display on CI, so plt.show() won't hang

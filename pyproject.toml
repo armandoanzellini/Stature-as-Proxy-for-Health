@@ -29,6 +29,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 py-modules = ["StatureHealthBayes"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [project.urls]
 Homepage = "https://github.com/armandoanzellini/stature-health-proxy"
 Changelog = "https://github.com/armandoanzellini/stature-health-proxy/releases"
