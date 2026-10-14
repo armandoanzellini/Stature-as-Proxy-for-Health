@@ -1,0 +1,36 @@
+[project]
+name = "stature-health-proxy"
+version = "0.1"
+description = "Python code for the analysis of stature as a proxy for health in bioarchaeological contexts of South American populations."
+readme = "README.md"
+requires-python = ">=3.14"
+authors = [{name = "Armando Anzellini"}]
+license = "BSD-3-Clause"
+classifiers = []
+dependencies = [
+"arviz==0.23.4", 
+"matplotlib==3.11.2",
+"numpy==2.4.6",
+"openpyxl==3.1.5",
+"pandas==3.0.6",
+"pymc==5.28.5",
+"scipy==1.18.0"
+]
+
+[dependency-groups]
+dev = [
+    "pytest"
+]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["StatureHealthBayes"]
+
+[project.urls]
+Homepage = "https://github.com/armandoanzellini/stature-health-proxy"
+Changelog = "https://github.com/armandoanzellini/stature-health-proxy/releases"
+Issues = "https://github.com/armandoanzellini/stature-health-proxy/issues"
+CI = "https://github.com/armandoanzellini/stature-health-proxy/actions"
