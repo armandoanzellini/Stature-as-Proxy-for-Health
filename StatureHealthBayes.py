@@ -161,9 +161,11 @@ def bayes_ANOVA(df, label, out_dir=None):
           expand='column',  # Places the trace and distribution panels side-by-side
           backend='matplotlib')
         
-
-    pc.viz['figure'].item().savefig(
-            direct / f"ANOVATrace_{label}.png", dpi=1200, bbox_inches='tight')
+    if out_dir:
+        pc.viz['figure'].item().savefig(
+                out_dir / f"ANOVATrace_{label}.png", dpi=1200, bbox_inches='tight')
+    else:
+        plt.show()
         
     # rename summary df to have site names
     summarydf = summarydf.rename(index=dict(zip(summarydf.index[:len(sites)], sites)))
@@ -356,9 +358,11 @@ def BEST(df1, df2, label, out_dir=None):
           expand='column',  # Places the trace and distribution panels side-by-side
           backend='matplotlib')
         
-
-      pc.viz['figure'].item().savefig(
-            direct / f"BESTTrace_{label}.png", dpi=1200, bbox_inches='tight')
+      if out_dir:
+          pc.viz['figure'].item().savefig(
+            out_dir / f"BESTTrace_{label}.png", dpi=1200, bbox_inches='tight')
+      else:
+          plt.show()
         
     # rename summary df to have site names
     summarydf = summarydf.rename(index=dict(zip(summarydf.index[:2], [df1.name, df2.name])))
