@@ -13,10 +13,13 @@ import numpy as np
 import arviz as az
 import pandas as pd
 import matplotlib.pyplot as plt
+import arviz_plots as azp
+
 from scipy import stats
 from pathlib import Path
 from math import ceil, floor
 from itertools import combinations
+from arviz.labels import MapLabeller
 from matplotlib.ticker import AutoMinorLocator
 
 
@@ -104,23 +107,26 @@ def bayes_ANOVA(df, label, out_dir=None):
     
     gm = sum(df['N']*df['Mean'])/df['N'].sum() # grand mean to use in Bayes ANOVA
     
-    with pm.Model() as bayes_anova:
+    # provide site names to keep track of site data in model
+    sites = list(df.index)
+    
+    with pm.Model(coords={'site': sites}) as bayes_anova:
         # --- Priors ---
         # Grand mean (weakly informative; center on overall observed mean)
-        grand_mean = pm.Normal("grand_mean", mu=gm, sigma=10)
+        grand_mean = pm.Normal('grand_mean', mu=gm, sigma=10)
     
         # Between-group SD (assume 0 and check if different from it but always  >0)
         beta          = pm.HalfNormal('beta', sigma=5)
-        sigma_between = pm.HalfCauchy("sigma_between", beta=beta)
+        sigma_between = pm.HalfCauchy('sigma_between', beta=beta)
     
         # True latent mean for each group
-        true_group_means = pm.Normal("true_group_means",
+        true_group_means = pm.Normal('true_group_means',
                                       mu=grand_mean,
                                       sigma=sigma_between,
-                                      shape=len(df))
+                                      dims='site')
     
         # --- Likelihood ---
-        obs = pm.StudentT("obs",
+        obs = pm.StudentT('obs',
                         nu=df['N'] - 1,
                         mu=true_group_means,
                         sigma=df['SE'],          # known (estimated) SE
@@ -135,10 +141,31 @@ def bayes_ANOVA(df, label, out_dir=None):
                           random_seed=42)
     
     # Inspect results by extracting data and plotting    
-    summarydf = az.summary(trace, var_names=["true_group_means", "grand_mean", "sigma_between"]) 
+    summarydf = az.summary(trace, var_names=['true_group_means', 'grand_mean', 'sigma_between']) 
     
+    # plotting trace plots
+    labeller = MapLabeller(var_name_map={
+                    'true_group_means': r'$\mu$',
+                    'grand_mean': r'$\bar{\bar{X}}_{GM}$',
+                    'sigma_between' : r'$\sigma^{2}_{between}$'
+                    })
+    
+    with plt.style.context('arviz-doc'):
+      pc = azp.combine_plots(
+          trace,
+          plots=[
+              (azp.plot_dist, {'ci_kind': 'hdi', 'ci_prob': 0.94, 'labeller': labeller,
+                               'visuals': {'point_estimate_text': {'round_to': 1}}}),
+              (azp.plot_trace, {'labeller': labeller})],
+          var_names=['true_group_means', 'grand_mean', 'sigma_between'],
+          expand='column',  # Places the trace and distribution panels side-by-side
+          backend='matplotlib')
+        
+
+    pc.viz['figure'].item().savefig(
+            direct / f"ANOVATrace_{label}.png", dpi=1200, bbox_inches='tight')
+        
     # rename summary df to have site names
-    sites = list(df.index)
     summarydf = summarydf.rename(index=dict(zip(summarydf.index[:len(sites)], sites)))
     
     # save to table if specified
@@ -146,8 +173,8 @@ def bayes_ANOVA(df, label, out_dir=None):
         summarydf.to_excel(out_dir / f"ANOVAstats_{label}.xlsx")
     
     # Extract all posterior samples for group means and sigma_between
-    post_means = trace.posterior["true_group_means"].values  # shape: (chains, draws, groups)
-    sigmas = trace.posterior["sigma_between"].values.flatten()
+    post_means = trace.posterior['true_group_means'].values  # shape: (chains, draws, groups)
+    sigmas = trace.posterior['sigma_between'].values.flatten()
     
     # Flatten chains and draws together for group means
     samples = post_means.reshape(-1, len(df)).T  # shape: (groups, total_draws)
@@ -165,7 +192,7 @@ def bayes_ANOVA(df, label, out_dir=None):
         hdi0 = az.hdi(samples[i], hdi_prob=0.94)
         
         #plot hist and line
-        ax0.hist(samples[i], bins=40, density=True, color="steelblue", alpha=0.25, edgecolor='k')
+        ax0.hist(samples[i], bins=40, density=True, color='steelblue', alpha=0.25, edgecolor='k')
         ax0.plot(x0 := sorted(samples[i]), dens0(x0), 
                 color='k', alpha=0.8, linestyle=linestyles[i],
                 label=sites[i])
@@ -197,15 +224,15 @@ def bayes_ANOVA(df, label, out_dir=None):
     hdi1 = az.hdi(sigmas, hdi_prob=0.94)
     
     #plot hist and line
-    ax2.hist(sigmas, bins=40, density=True, color="steelblue", alpha=0.25, edgecolor='k')
+    ax2.hist(sigmas, bins=40, density=True, color='steelblue', alpha=0.25, edgecolor='k')
     ax2.plot(x1 := sorted(sigmas), dens1(x1), color='black', alpha=0.8)
-    ax2.axvline(0, linestyle=":", color='k')
+    ax2.axvline(0, linestyle=':', color='k')
     
     ax3.errorbar(x=np.mean(sigmas), y='Sigma', 
                  xerr=[[np.mean(sigmas) - hdi1[0]], [hdi1[1] - np.mean(sigmas)]],
                  color='k',
                  marker='o',alpha=0.8)
-    ax3.axvline(0, linestyle=":", color='k')
+    ax3.axvline(0, linestyle=':', color='k')
     
     ax3.spines[['top', 'right', 'left']].set_visible(False)
     ax3.set_xlabel('94% Highest Density Interval (HDI)')
@@ -240,23 +267,23 @@ def bayes_ANOVA(df, label, out_dir=None):
     
     
     # Make table of results
-    post = trace.posterior["true_group_means"]
+    post = trace.posterior['true_group_means']
     anova_resdict = {}
     
-    for i, j in combinations(post['true_group_means_dim_0'].values, 2):
-        diff = (post.isel(true_group_means_dim_0=j).values.flatten() - 
-                post.isel(true_group_means_dim_0=i).values.flatten())
+    for i, j in combinations(sites, 2):
+        diff = (post.sel(site=j).values.flatten() - 
+                post.sel(site=i).values.flatten())
         
         hdi = az.hdi(diff, hdi_prob=0.94)
         
-        key = f'{sites[j]} vs {sites[i]}'
+        key = f'{j} vs {i}'
         
         anova_resdict[key] = {'Difference of Means' : round(diff.mean(), 3),
                               '94% HDI'         : f'{hdi[0]:.3f}-{hdi[1]:.3f}'}
         
-        print(f"{sites[j]} vs {sites[i]}:")
-        print(f"  Mean difference: {diff.mean():.3f}")
-        print(f"  94% HDI:         [{hdi[0]:.3f}, {hdi[1]:.3f}]")
+        print(f'{key}:')
+        print(f'  Mean difference: {diff.mean():.3f}')
+        print(f'  94% HDI:         [{hdi[0]:.3f}, {hdi[1]:.3f}]')
         
     
     resdf = pd.DataFrame.from_dict(anova_resdict, orient='index').sort_index()
@@ -289,20 +316,20 @@ def BEST(df1, df2, label, out_dir=None):
     with pm.Model() as BEST_summary:
     
         # --- Priors ---
-        mu_1 = pm.Normal("mu_1", mu=mu_m, sigma=mu_s)
-        mu_2 = pm.Normal("mu_2", mu=mu_m, sigma=mu_s)
+        mu_1 = pm.Normal('mu_1', mu=mu_m, sigma=mu_s)
+        mu_2 = pm.Normal('mu_2', mu=mu_m, sigma=mu_s)
     
         # nu fixed at n-1 since we can't estimate it from summary stats
         nu_1 = n_1 - 1
         nu_2 = n_2 - 1
     
         # --- Likelihoods (StudentT on observed group means) ---
-        obs_1 = pm.StudentT("obs_1", nu=nu_1, mu=mu_1, sigma=se_1, observed=df1['Mean'])
-        obs_2 = pm.StudentT("obs_2", nu=nu_2, mu=mu_2, sigma=se_2, observed=df2['Mean'])
+        obs_1 = pm.StudentT('obs_1', nu=nu_1, mu=mu_1, sigma=se_1, observed=df1['Mean'])
+        obs_2 = pm.StudentT('obs_2', nu=nu_2, mu=mu_2, sigma=se_2, observed=df2['Mean'])
     
         # --- Deterministics ---
-        diff_means  = pm.Deterministic("diff_means",  mu_1 - mu_2)
-        effect_size = pm.Deterministic("effect_size",
+        diff_means  = pm.Deterministic('diff_means',  mu_1 - mu_2)
+        effect_size = pm.Deterministic('effect_size',
                           diff_means / np.sqrt((std_1**2 + std_2**2) / 2))  # pooled SD fixed
     
         trace = pm.sample(2000, tune=2000, cores=1, chains=4, target_accept=0.95, random_seed=42)
@@ -310,6 +337,29 @@ def BEST(df1, df2, label, out_dir=None):
     # The key posteriors Kruschke plots available for these data
     summarydf = az.summary(trace) 
     
+    # trace plots, labeled by site
+    labeller = MapLabeller(var_name_map={
+        'mu_1': rf'$\mu$ ({df1.name})',
+        'mu_2': rf'$\mu$ ({df2.name})',
+        'diff_means': r'$\delta\mu$',
+        'effect_size': r'$\alpha$',
+    })
+
+    with plt.style.context('arviz-doc'):
+      pc = azp.combine_plots(
+          trace,
+          plots=[
+              (azp.plot_dist, {'ci_kind': 'hdi', 'ci_prob': 0.94, 'labeller': labeller,
+                               'visuals': {'point_estimate_text': {'round_to': 1}}}),
+              (azp.plot_trace, {'labeller': labeller})],
+          var_names=['mu_1', 'mu_2', 'diff_means', 'effect_size'],
+          expand='column',  # Places the trace and distribution panels side-by-side
+          backend='matplotlib')
+        
+
+      pc.viz['figure'].item().savefig(
+            direct / f"BESTTrace_{label}.png", dpi=1200, bbox_inches='tight')
+        
     # rename summary df to have site names
     summarydf = summarydf.rename(index=dict(zip(summarydf.index[:2], [df1.name, df2.name])))
     
@@ -317,10 +367,10 @@ def BEST(df1, df2, label, out_dir=None):
     if out_dir:
         summarydf.to_excel(out_dir / f"BESTstats_{label}.xlsx")
     
-    samples1     = trace.posterior["mu_1"].values.flatten()
-    samples2     = trace.posterior["mu_2"].values.flatten()
-    samples_diff = trace.posterior["diff_means"].values.flatten()
-    samples_es   = trace.posterior["effect_size"].values.flatten()
+    samples1     = trace.posterior['mu_1'].values.flatten()
+    samples2     = trace.posterior['mu_2'].values.flatten()
+    samples_diff = trace.posterior['diff_means'].values.flatten()
+    samples_es   = trace.posterior['effect_size'].values.flatten()
     
     samples = np.stack([samples1, samples2])
     
@@ -334,7 +384,7 @@ def BEST(df1, df2, label, out_dir=None):
         hdi = az.hdi(samples[i], hdi_prob=0.94)
         
         #plot hist and line
-        ax0.hist(samples[i], bins=40, density=True, color="steelblue", alpha=0.25, edgecolor='k')
+        ax0.hist(samples[i], bins=40, density=True, color='steelblue', alpha=0.25, edgecolor='k')
         ax0.plot(x := sorted(samples[i]), dens(x), 
                 color='k', alpha=0.8, linestyle=linestyles[i],
                 label=j)
@@ -354,7 +404,7 @@ def BEST(df1, df2, label, out_dir=None):
         ax1.margins(0.5)
         
         ax0.set_title(f'BEST Distributions - {label}')
-        ax0.set_xlabel("Post. Estimated Mean")
+        ax0.set_xlabel('Post. Estimated Mean')
         ax0.xaxis.set_minor_locator(AutoMinorLocator())
         ax0.spines[['top', 'right', 'left']].set_visible(False)
         ax0.set_yticklabels([])
@@ -379,9 +429,9 @@ def BEST(df1, df2, label, out_dir=None):
         hdi = az.hdi(sample_stats[i], hdi_prob=0.94)
         
         #plot hist and line
-        ax0[i].hist(sample_stats[i], bins=40, density=True, color="steelblue", alpha=0.25, edgecolor='k')
+        ax0[i].hist(sample_stats[i], bins=40, density=True, color='steelblue', alpha=0.25, edgecolor='k')
         ax0[i].plot(x := sorted(sample_stats[i]), dens(x), color='black', alpha=0.8)
-        ax0[i].axvline(0, linestyle=":", color='k')
+        ax0[i].axvline(0, linestyle=':', color='k')
         ax0[i].set_title(j)
         
         ax1[i].errorbar(x=np.mean(sample_stats[i]), y='Sigma', 
@@ -389,7 +439,7 @@ def BEST(df1, df2, label, out_dir=None):
                            [hdi[1] - np.mean(sample_stats[i])]],
                      color='k',
                      marker='o',alpha=0.8)
-        ax1[i].axvline(0, linestyle=":", color='k')
+        ax1[i].axvline(0, linestyle=':', color='k')
         ax1[i].spines[['top', 'right', 'left']].set_visible(False)
         ax1[i].xaxis.set_minor_locator(AutoMinorLocator())
         ax1[i].tick_params(left=False)
@@ -433,7 +483,7 @@ def BEST(df1, df2, label, out_dir=None):
 # --- Run ---
 if __name__ == '__main__':
     # Load variable from .env file that defines the path to the dataset xlsx file
-    with open("env.json", "r") as f:
+    with open("env.json", 'r') as f:
         direct  = Path(json.load(f)["data_path"])  # get the path securely from the json file
 
     data_loc = direct / "StatureData.xlsx"  
