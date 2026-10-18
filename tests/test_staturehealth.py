@@ -35,7 +35,7 @@ def test_boxplots(toy, tmp_path):
 
 def test_bayes_anova(toy, tmp_path):
     shb.bayes_ANOVA(toy, "Test", out_dir=tmp_path)
-    assert len(list(tmp_path.iterdir())) == 3  # stats table, pairwise table, figure
+    assert len(list(tmp_path.iterdir())) == 4  # stats table, pairwise table, figure
 
     summary = pd.read_excel(tmp_path / "ANOVAstats_Test.xlsx", index_col=0)
     assert summary.loc["A", "mean"] == pytest.approx(160.0, abs=2.0)  # site labels line up
@@ -43,7 +43,7 @@ def test_bayes_anova(toy, tmp_path):
 
 def test_best(toy, tmp_path):
     shb.BEST(toy.loc["A"], toy.loc["B"], "Test", out_dir=tmp_path)
-    assert len(list(tmp_path.iterdir())) == 3  # stats table, two figures
+    assert len(list(tmp_path.iterdir())) == 4  # stats table, two figures
 
     summary = pd.read_excel(tmp_path / "BESTstats_Test.xlsx", index_col=0)
     assert summary.loc["diff_means", "mean"] == pytest.approx(-5.0, abs=1.5)  # 160 - 165
