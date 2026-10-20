@@ -7,5 +7,7 @@ authors:
     orcid: "https://orcid.org/0000-0003-4202-8629"
 url: "https://github.com/armandoanzellini/Stature-as-Proxy-for-Health"	
 doi: "10.5281/zenodo.23459741"
+license: "BSD 3-Clause License"
 version: "v0.1.0"
+repository-code: "https://github.com"
 date-released: 2026-10-18
